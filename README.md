@@ -1,113 +1,97 @@
-# Plant Disease Classifier with Explainability (Grad-CAM) & On-Device Deployment
+# Plant Disease Classification, Grad-CAM Explainability & Mobile Deployment
 
-An end-to-end deep learning project exploring convolutional architectures, transfer learning, and Explainable AI (XAI) to detect dataset shortcut learning, followed by TensorFlow Lite quantization and on-device mobile deployment.
+A computer vision project focused on training and evaluating convolutional neural networks on the PlantVillage dataset, using Grad-CAM to inspect what the model actually learns, and deploying a quantized model to an on-device React Native app.
 
-Developed as a personal research project in preparation for the **Erasmus Mundus Master in Image Processing and Computer Vision / Artificial Intelligence (IPCVAI)**.
-
----
-
-## 📌 Project Overview & Motivation
-As a mobile software engineer with over 4 years of experience building agricultural and client applications, I wanted to understand the full computer vision lifecycle from first principles:
-1. Training a baseline convolutional neural network from scratch vs. transfer learning on a mobile-first architecture (**MobileNetV2**).
-2. Implementing **Grad-CAM (Gradient-weighted Class Activation Mapping)** using `tf.GradientTape` from scratch to inspect model decision boundaries.
-3. Critically analyzing **Shortcut Learning**: investigating whether high benchmark scores were genuine or driven by uniform laboratory backgrounds.
-4. Exporting to **TensorFlow Lite (FP16 quantization)** and deploying to a **React Native** application for on-device inference with zero cloud dependencies.
+I built this project to deepen my understanding of deep learning and computer vision fundamentals (convolutions, transfer learning, model explainability) before starting graduate studies in computer vision.
 
 ---
 
-## 🔬 Dataset & Experimental Setup
-- **Dataset:** PlantVillage (via `tensorflow_datasets`, `plant_village`)
-- **Scale:** 54,303 leaf images across 38 crop-disease categories.
-- **Split Strategy:** Deterministic stratified splitting with seed `42`:
-  - **Train (70%):** 38,012 images
-  - **Validation (15%):** 8,146 images (model checkpointing & early stopping)
-  - **Test (15%):** 8,145 images (held out until final evaluation)
+## What this project covers
+- **Data & Limitations:** Analyzing class imbalance on 38 plant disease classes and investigating how laboratory backgrounds lead to shortcut learning.
+- **Custom CNN vs Transfer Learning:** Building a 4-block CNN from scratch, then fine-tuning MobileNetV2 with frozen batch normalization and a low learning rate.
+- **Grad-CAM from scratch:** Writing gradient-weighted class activation mapping directly using TensorFlow's `GradientTape` without high-level wrapper libraries.
+- **TFLite Quantization:** Converting the fine-tuned model to float16 (reducing size from 8.9 MB to 4.39 MB with zero accuracy drop).
+- **On-device Mobile App:** React Native app using `react-native-fast-tflite` for local inference.
 
 ---
 
-## 📊 Models & Comparative Results
+## Dataset & Splitting
+- **Dataset:** PlantVillage (54,303 leaf images across 38 classes).
+- **Split:** Deterministic 70% train (38,012 images), 15% validation (8,146 images), and 15% test (8,145 images) with fixed seed `42`.
+- **Class Imbalance:** Highly skewed (Citrus Greening has 5,507 images while Potato Healthy has only 152 images). Because of this, I used **Macro F1** rather than standard accuracy as the primary evaluation metric.
 
-| Architecture | Strategy | Parameters | Size (MB) | Test Accuracy | Macro F1 | Epoch Time (T4 GPU) |
+---
+
+## Experiments & Results
+
+| Model | Setup | Parameters | Size | Test Accuracy | Macro F1 | Epoch Time (Colab T4) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Custom 4-Block CNN** | Scratch (Random Init) | ~420 K | 1.7 MB | 88.4% | 86.1% | ~24s |
-| **MobileNetV2** | Phase A: Frozen Backbone | ~2.3 M | 9.2 MB | 94.8% | 93.2% | ~18s |
-| **MobileNetV2** | Phase B: Fine-Tuned (>100) | ~2.3 M | 9.2 MB | **98.6%** | **98.1%** | ~21s |
-
-> **Why Macro F1?**  
-> PlantVillage has significant class imbalance (e.g., *Citrus Greening* has 5,507 samples while *Potato Healthy* has only 152 samples — a 36:1 ratio). Macro F1 computes the unweighted mean across all 38 classes, giving equal weight to rare and abundant classes.
+| **Small CNN (Scratch)** | 4 Conv blocks + GlobalAvgPool | ~420 K | 1.7 MB | 88.4% | 86.1% | ~24s |
+| **MobileNetV2** | Phase A (Frozen Backbone) | ~2.3 M | 9.2 MB | 94.8% | 93.2% | ~18s |
+| **MobileNetV2** | Phase B (Fine-tuned > layer 100) | ~2.3 M | 9.2 MB | **98.6%** | **98.1%** | ~21s |
 
 ---
 
-## 🧠 Explainability: Grad-CAM & Shortcut Learning Analysis
+## Grad-CAM Findings: Shortcut Learning
+The primary motivation for this project was to understand model interpretability using Grad-CAM.
 
-### Mathematical Formulation
-Grad-CAM computes the gradient of target class score $y^c$ with respect to feature activation maps $A^k$ of the final convolutional layer (`out_relu`):
-$$\alpha_k^c = \frac{1}{Z} \sum_{i=1}^H \sum_{j=1}^W \frac{\partial y^c}{\partial A_{i, j}^k}$$
-$$L_{\text{Grad-CAM}}^c = \text{ReLU}\left( \sum_k \alpha_k^c A^k \right)$$
-
-### Key Experimental Insights:
-1. **On In-Domain Test Data:** Heatmaps focus sharply on visible symptoms (e.g., target-spot concentric rings, bacterial necrosis).
-2. **On Natural Outdoor Backgrounds:** When leaves are placed in real-world contexts (held by human hands, in outdoor soil), accuracy drops from **98.6%** to **~68%**.
-3. **The Shortcut Learning Trap:** The Grad-CAM activations on perturbed backgrounds diffuse toward paper edges, wood grain, or fingers. The network learned statistical shortcuts from the uniform laboratory boards used during dataset collection. This proves why lab-trained classifiers cannot be deployed to farmers without domain adaptation.
+### Observations:
+1. **On lab test images:** The model correctly localizes spots, chlorosis, and leaf edges with high confidence.
+2. **On natural background images:** When leaves were tested against natural backgrounds (hands holding leaves, outdoor soil, sun glare), prediction confidence dropped from ~98% to ~65-72%.
+3. **Why?** PlantVillage leaves were photographed on plain gray sheets, tables, or black cardboard. The feature maps revealed that the network often relies on background textures and leaf contours rather than solely inspecting the lesion pathology. This is a clear demonstration of **shortcut learning** in vision models.
 
 ---
 
-## 📱 Mobile Deployment & Quantization Benchmark
+## Model Quantization & Parity
 
-### TFLite Quantization (Size vs Parity)
-| Export Precision | Model Size | Size Reduction | Parity on 50 Test Samples |
-| :--- | :--- | :--- | :--- |
-| **Float32 (Unquantized)** | 8.9 MB | Baseline | 100% agreement |
-| **Float16 Quantization** | **4.39 MB** | **~50%** | **100% agreement** (mean diff < 0.002) |
-| **Dynamic Range INT8** | 2.6 MB | ~71% | 98.7% agreement |
+I exported the fine-tuned model to TensorFlow Lite and verified output parity against Keras across 50 test samples:
 
-### Mobile Architecture (`mobile-app/`)
-- Built with **React Native** + **TypeScript** using `react-native-fast-tflite` for direct C++ Nitro module execution on mobile NPUs/GPUs.
-- **Preprocessing Guard:** Implemented $(x / 127.5) - 1.0$ normalization matching MobileNetV2 training bit-for-bit.
-- **Inference Latency:** Average on-device latency of **~24 ms** across 20 iterations (excluding warm-up).
+- **Float32:** 8.9 MB
+- **Float16 Quantized:** 4.39 MB (50% reduction, average probability difference < 0.002, 100% class match)
+- **INT8 Dynamic Range:** 2.6 MB (71% reduction)
+
+The Float16 model (`plant_disease_model.tflite`) is stored in `models/`.
 
 ---
 
-## 📁 Repository Structure
+## Repository Structure
 ```
 plant-disease-cv/
 ├── notebooks/
-│   ├── 01_data_exploration.ipynb     # TFDS loading, imbalance analysis, stratified split
-│   ├── 02_baseline_cnn.ipynb         # 4-block CNN from scratch + augmentation pipeline
-│   ├── 03_transfer_learning.ipynb    # MobileNetV2 (Freeze -> Fine-tune) & Test evaluation
-│   ├── 04_gradcam.ipynb              # Mathematical Grad-CAM implementation & bias test
-│   └── 05_tflite_export.ipynb        # FP16 quantization & numerical parity verification
-├── mobile-app/                       # React Native diagnostic app (TypeScript)
+│   ├── 01_data_exploration.ipynb
+│   ├── 02_baseline_cnn.ipynb
+│   ├── 03_transfer_learning.ipynb
+│   ├── 04_gradcam.ipynb
+│   └── 05_tflite_export.ipynb
+├── mobile-app/              # React Native app (TypeScript)
 ├── models/
-│   ├── plant_disease_model.tflite    # Exported FP16 model (4.39 MB)
-│   └── labels.txt                    # 38 PlantVillage target classes
-├── results/                          # Figures, confusion matrices, and benchmark reports
-├── server.py                         # Local Python inference server using OpenCV DNN
-├── index.html                        # Local on-device browser tester
-└── requirements.txt                  # Python dependencies
+│   ├── plant_disease_model.tflite
+│   └── labels.txt
+├── results/                 # Confusion matrix, distribution plots, metrics
+├── server.py                # Local test server using OpenCV DNN
+├── index.html               # Quick web tester
+├── test_model.py            # CLI verification script
+└── requirements.txt
 ```
 
 ---
 
-## 🚀 Getting Started
+## Running Locally
 
-### Local Model Tester (Web)
+### 1. Verification Script
 ```bash
-# Clone the repository
-git clone https://github.com/<your-username>/plant-disease-cv.git
-cd plant-disease-cv
-
-# Install requirements
-pip install -r requirements.txt
-
-# Run local inference server
-python server.py
-# Open http://localhost:8000 in your browser
+python test_model.py
 ```
 
-### Running Mobile App
+### 2. Local Web Tester
+```bash
+python server.py
+# Open http://localhost:8000
+```
+
+### 3. Mobile App
 ```bash
 cd mobile-app
 npm install
-npx react-native run-android # or run-ios
+npx react-native run-android
 ```
