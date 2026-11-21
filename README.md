@@ -71,6 +71,7 @@ plant-disease-cv/
 ├── server.py                # Local test server using OpenCV DNN
 ├── index.html               # Quick web tester
 ├── test_model.py            # CLI verification script
+├── THEORY.md                # Mathematical derivations & interview notes
 └── requirements.txt
 ```
 
